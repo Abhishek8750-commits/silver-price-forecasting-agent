@@ -1,0 +1,94 @@
+
+// ==================== ZETHETA SILVER DASHBOARD - 25 DAX MEASURES ====================
+// Page 1: Price Analytics
+
+1. Avg Close Price = AVERAGE(SilverDaily[Close])
+
+2. Avg Forecast = AVERAGE(SilverDaily[Ensemble_Pred])
+
+3. Avg Error % = AVERAGE(SilverDaily[Error_Pct])
+
+4. Model Accuracy % = 100 - [Avg Error %]
+
+5. VWAP Measure = 
+DIVIDE(
+    SUMX(SilverDaily, SilverDaily[Close] * SilverDaily[Volume]),
+    SUM(SilverDaily[Volume])
+)
+
+6. Max Close = MAX(SilverDaily[Close])
+7. Min Close = MIN(SilverDaily[Close])
+
+// ==================== Page 2: Risk Analytics
+
+8. Daily Returns % = 
+VAR CurrentClose = MAX(SilverDaily[Close])
+VAR PrevClose = CALCULATE(MAX(SilverDaily[Close]), DATEADD(SilverDaily[Date], -1, DAY))
+RETURN DIVIDE(CurrentClose - PrevClose, PrevClose) * 100
+
+9. Rolling Volatility 20D (Annualized) =
+VAR CurrentDate = MAX(SilverDaily[Date])
+VAR Last20Days = FILTER(ALL(SilverDaily), SilverDaily[Date] <= CurrentDate && SilverDaily[Date] > CurrentDate - 28)
+VAR StdDev = CALCULATE(STDEV.P(SilverDaily[Log_Returns]), Last20Days)
+RETURN StdDev * SQRT(252) * 100
+
+10. Max Drawdown =
+VAR PriceTable = ADDCOLUMNS(SilverDaily, "RunningMax", CALCULATE(MAX(SilverDaily[Close]), FILTER(ALL(SilverDaily), SilverDaily[Date] <= EARLIER(SilverDaily[Date]))))
+VAR DrawdownTable = ADDCOLUMNS(PriceTable, "Drawdown", DIVIDE([Close] - [RunningMax], [RunningMax]))
+RETURN MINX(DrawdownTable, [Drawdown]) * 100
+
+11. Sharpe Ratio =
+VAR AvgReturn = AVERAGE(SilverDaily[Returns_Pct]) / 100
+VAR StdReturn = STDEV.P(SilverDaily[Returns_Pct]) / 100
+VAR RiskFreeDaily = 0.05 / 252
+VAR ExcessReturn = AvgReturn - RiskFreeDaily
+RETURN DIVIDE(ExcessReturn, StdReturn) * SQRT(252)
+
+12. RSI 14 =
+VAR CurrentDate = MAX(SilverDaily[Date])
+VAR Last14Days = TOPN(14, FILTER(ALL(SilverDaily), SilverDaily[Date] <= CurrentDate), SilverDaily[Date], DESC)
+VAR AvgGain = CALCULATE(AVERAGEX(FILTER(Last14Days, SilverDaily[Dollar_Change] > 0), SilverDaily[Dollar_Change]))
+VAR AvgLoss = CALCULATE(AVERAGEX(FILTER(Last14Days, SilverDaily[Dollar_Change] < 0), ABS(SilverDaily[Dollar_Change])))
+VAR RS = DIVIDE(AvgGain, AvgLoss)
+RETURN 100 - DIVIDE(100, 1 + RS)
+
+13. VaR 95% = PERCENTILE.INC(SilverDaily[Returns_Pct], 0.05)
+14. CVaR 95% = CALCULATE(AVERAGE(SilverDaily[Returns_Pct]), FILTER(SilverDaily, SilverDaily[Returns_Pct] <= [VaR 95%]))
+
+// ==================== Page 3: Model Comparison
+
+15. RMSE = SQRT(AVERAGEX(SilverDaily, (SilverDaily[Close] - SilverDaily[Ensemble_Pred])^2))
+
+16. MAE = AVERAGEX(SilverDaily, ABS(SilverDaily[Close] - SilverDaily[Ensemble_Pred]))
+
+17. MAPE % = AVERAGEX(SilverDaily, DIVIDE(ABS(SilverDaily[Close] - SilverDaily[Ensemble_Pred]), SilverDaily[Close])) * 100
+
+18. Directional Accuracy % =
+VAR Correct = COUNTROWS(FILTER(SilverDaily, SIGN(SilverDaily[Close] - SilverDaily[Close]) = SIGN(SilverDaily[Ensemble_Pred] - SilverDaily[Close])))
+RETURN DIVIDE(Correct, COUNTROWS(SilverDaily)) * 100
+
+19. XGBoost vs Ensemble Diff = [Avg Forecast] - AVERAGE(SilverDaily[XGBoost_Pred])
+
+// ==================== Page 4: Macro & Sentiment
+
+20. Silver Gold Correlation 60D =
+VAR CurrentDate = MAX(SilverDaily[Date])
+VAR PeriodData = FILTER(ALL(MacroMonthly), MacroMonthly[Date] <= CurrentDate && MacroMonthly[Date] > CurrentDate - 90)
+VAR AvgSilver = AVERAGEX(PeriodData, MacroMonthly[Silver_Price_USD])
+VAR AvgGold = AVERAGEX(PeriodData, MacroMonthly[Gold_Price_USD])
+RETURN DIVIDE(AVERAGEX(PeriodData, (MacroMonthly[Silver_Price_USD]-AvgSilver)*(MacroMonthly[Gold_Price_USD]-AvgGold)), STDEV.P(MacroMonthly[Silver_Price_USD]) * STDEV.P(MacroMonthly[Gold_Price_USD]))
+
+21. Gold Silver Ratio = DIVIDE(MAX(MacroMonthly[Gold_Price_USD]), MAX(SilverDaily[Close]))
+
+22. Real Interest Rate = MAX(MacroMonthly[Fed_Funds_Rate]) - MAX(MacroMonthly[US_CPI_Index])
+
+23. COT Net Speculative Long = MAX(SentimentWeekly[CFTC_NonCommercial_Long]) - MAX(SentimentWeekly[CFTC_NonCommercial_Short])
+
+24. Supply Demand Signal =
+VAR CurrentYear = YEAR(MAX(SilverDaily[Date]))
+VAR Balance = CALCULATE(SUM(SupplyDemand[Supply_Demand_Balance_MOz]), SupplyDemand[Year] = CurrentYear)
+RETURN SWITCH(TRUE(), Balance > 50, "Surplus: Bearish", Balance > 0, "Slight Surplus", Balance > -50, "Mildly Bullish", "Significant Deficit: Bullish")
+
+25. COT Extremes Alert =
+VAR COT_Index = DIVIDE([COT Net Speculative Long] - 100000, 200000)
+RETURN IF(COT_Index > 0.9, "Extreme Long - Bearish Reversal Risk", IF(COT_Index < 0.1, "Extreme Short - Bullish Opportunity", "Normal"))
